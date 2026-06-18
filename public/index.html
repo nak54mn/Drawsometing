@@ -264,7 +264,8 @@
   <div class="modal">
     <h2 id="revealTitle">時間到!</h2>
     <div class="reveal-word" id="revealWord">＿＿</div>
-    <p class="hint">下一題馬上來…</p>
+    <p class="hint" id="revealHint">下一題馬上來…</p>
+    <button id="nextRoundBtn" class="btn block">下一局 ▶</button>
   </div>
 </div>
 
@@ -351,6 +352,8 @@ $('exportBtn').onclick=()=>{
 // ---- 選詞 ----
 $('rerollBtn').onclick=()=>socket.emit('rerollWords');
 socket.on('chooseWord',({choices})=>{
+  $('revealOverlay').classList.remove('show'); // 關掉上一回合結算,避免蓋住選詞
+  clearInterval(window._revealCd);
   const box=$('choices'); box.innerHTML='';
   choices.forEach(w=>{
     const b=document.createElement('button');
@@ -368,6 +371,7 @@ socket.on('yourWord',({word})=>{ // 只有畫家
 socket.on('roundStart',({masked,length,endsAt})=>{
   $('chooseOverlay').classList.remove('show');
   $('revealOverlay').classList.remove('show');
+  clearInterval(window._revealCd);
   if(!amDrawer){ $('wordTag').textContent=`${masked}(${length}字)`; $('wordTag').style.display='block'; }
   clearCanvas();
 });
@@ -383,7 +387,21 @@ socket.on('roundEnd',({word,reason})=>{
   $('revealWord').textContent=word;
   $('revealOverlay').classList.add('show');
   $('tools').style.display='none';
+  $('nextRoundBtn').disabled=false;
+  // 6 秒倒數提示,任何人可提前按
+  let s=6; $('revealHint').textContent=`${s} 秒後自動下一局,或點按鈕直接開始`;
+  clearInterval(window._revealCd);
+  window._revealCd=setInterval(()=>{
+    s--; if(s<=0){clearInterval(window._revealCd);$('revealHint').textContent='換下一位畫家中…';}
+    else $('revealHint').textContent=`${s} 秒後自動下一局,或點按鈕直接開始`;
+  },1000);
 });
+$('nextRoundBtn').onclick=()=>{
+  $('nextRoundBtn').disabled=true;
+  $('revealHint').textContent='換下一位畫家中…';
+  clearInterval(window._revealCd);
+  socket.emit('nextRound');
+};
 
 // ---- 聊天 / 搶答 ----
 function addMsg(html,cls=''){
