@@ -83,10 +83,10 @@ function wordPool(room) {
   return [...base, ...room.customWords];
 }
 
-function pick3(room) {
+function pickWords(room, n = 4) {
   const pool = [...wordPool(room)];
   const out = [];
-  for (let i = 0; i < 3 && pool.length; i++) {
+  for (let i = 0; i < n && pool.length; i++) {
     const idx = Math.floor(Math.random() * pool.length);
     out.push(pool.splice(idx, 1)[0]);
   }
@@ -125,7 +125,7 @@ function nextDrawer(room) {
   room.roundNo += 1;
   room.state = 'choosing';
   room.word = null;
-  room.wordChoices = pick3(room);
+  room.wordChoices = pickWords(room, 4);
   room.guessedThisRound = {};
   room.strokes = [];
   io.to(room.id).emit('clearCanvas');
@@ -241,6 +241,14 @@ io.on('connection', (socket) => {
     startDrawing(room, word);
   });
 
+  // 畫家不喜歡這批詞,重抽一次
+  socket.on('rerollWords', () => {
+    const room = joinedRoom;
+    if (!room || room.state !== 'choosing' || socket.id !== room.drawerId) return;
+    room.wordChoices = pickWords(room, 4);
+    io.to(room.drawerId).emit('chooseWord', { choices: room.wordChoices });
+  });
+
   socket.on('setDifficulty', ({ difficulty }) => {
     const room = joinedRoom;
     if (!room || room.hostId !== socket.id) return;
@@ -261,11 +269,21 @@ io.on('connection', (socket) => {
   });
 
   // ---- 畫圖事件 ----
+  // 單筆(目前只用於填色指令)
   socket.on('draw', (data) => {
     const room = joinedRoom;
     if (!room || socket.id !== room.drawerId || room.state !== 'drawing') return;
     room.strokes.push(data);
     socket.to(room.id).emit('draw', data);
+  });
+  // 批次線條:一次收一串,存進歷史並原封廣播
+  socket.on('drawBatch', (arr) => {
+    const room = joinedRoom;
+    if (!room || socket.id !== room.drawerId || room.state !== 'drawing') return;
+    if (!Array.isArray(arr) || !arr.length) return;
+    if (arr.length > 500) arr = arr.slice(0, 500); // 防爆量
+    for (const d of arr) room.strokes.push(d);
+    socket.to(room.id).emit('drawBatch', arr);
   });
   socket.on('clearCanvas', () => {
     const room = joinedRoom;
@@ -344,6 +362,22 @@ io.on('connection', (socket) => {
 });
 
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+// 詞庫匯出:/words/房號  -> 下載該房目前完整詞庫(內建+自訂)
+app.get('/words/:room', (req, res) => {
+  const id = String(req.params.room || '').trim().toLowerCase();
+  const room = rooms[id];
+  const data = {
+    room: id,
+    difficulty: room ? room.difficulty : null,
+    builtin: DEFAULT_WORDS,
+    custom: room ? room.customWords : [],
+    exportedAt: new Date().toISOString(),
+  };
+  res.setHeader('Content-Disposition', `attachment; filename="words-${id || 'default'}.json"`);
+  res.json(data);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 server.listen(PORT, () => {
