@@ -181,6 +181,7 @@ function everyoneGuessed(room) {
 function endRound(room, reason) {
   clearRoundTimer(room);
   room.state = 'reveal';
+  room.advancing = false; // 是否已開始換下一局(防重複)
   const revealedWord = room.word;
   broadcast(room);
   io.to(room.id).emit('roundEnd', {
@@ -189,10 +190,16 @@ function endRound(room, reason) {
     scores: room.order.map((id) => room.players[id]).filter(Boolean)
       .map((p) => ({ name: p.name, score: p.score })),
   });
-  // 6 秒後換下一個人
-  setTimeout(() => {
-    if (rooms[room.id]) nextDrawer(room);
-  }, 6000);
+  // 最多等 6 秒自動換,期間任何人可按「下一局」提前換
+  room.revealTimer = setTimeout(() => advanceRound(room), 6000);
+}
+
+// 換到下一局(手動或自動都走這裡,確保只換一次)
+function advanceRound(room) {
+  if (!rooms[room.id] || room.state !== 'reveal' || room.advancing) return;
+  room.advancing = true;
+  if (room.revealTimer) { clearTimeout(room.revealTimer); room.revealTimer = null; }
+  nextDrawer(room);
 }
 
 io.on('connection', (socket) => {
@@ -239,6 +246,13 @@ io.on('connection', (socket) => {
     if (!room || room.state !== 'choosing' || socket.id !== room.drawerId) return;
     if (!room.wordChoices.includes(word)) return;
     startDrawing(room, word);
+  });
+
+  // 任何人在結算畫面按「下一局」可提前換局
+  socket.on('nextRound', () => {
+    const room = joinedRoom;
+    if (!room || room.state !== 'reveal') return;
+    advanceRound(room);
   });
 
   // 畫家不喜歡這批詞,重抽一次
