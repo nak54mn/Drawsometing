@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>你畫我猜・黑板教室</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  :root{
+    --board:#1f3b34;        /* 黑板綠 */
+    --board-2:#244339;
+    --chalk:#f4f1e8;        /* 粉筆白 */
+    --chalk-dim:#b9c4ba;
+    --crayon:#ff8a47;       /* 蠟筆橘 */
+    --crayon-2:#ffd166;     /* 蠟筆黃 */
+    --pink:#ff7b9c;
+    --frame:#5a3d28;        /* 木框 */
+    --frame-2:#74522f;
+    --good:#7ed957;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+    background:#11201c;color:var(--chalk);
+    -webkit-tap-highlight-color:transparent;overscroll-behavior:none;
+  }
+  .wrap{max-width:1100px;margin:0 auto;padding:14px;min-height:100%;}
+
+  /* ---- 入場 ---- */
+  .gate{display:flex;align-items:center;justify-content:center;min-height:90vh;}
+  .card{
+    background:var(--board);border:10px solid var(--frame);
+    border-radius:18px;padding:30px 26px;max-width:380px;width:100%;
+    box-shadow:0 14px 0 #0d1a16, 0 30px 60px rgba(0,0,0,.45);
+  }
+  .logo{font-size:34px;font-weight:900;letter-spacing:2px;line-height:1.15;
+    text-shadow:1px 1px 0 rgba(0,0,0,.3); transform:rotate(-2deg);}
+  .logo small{display:block;font-size:13px;font-weight:600;color:var(--chalk-dim);
+    letter-spacing:4px;margin-top:6px;transform:rotate(0deg)}
+  .field{margin-top:18px}
+  label{font-size:12px;color:var(--chalk-dim);letter-spacing:2px}
+  input,textarea,select{
+    width:100%;margin-top:6px;background:rgba(0,0,0,.22);border:2px dashed var(--chalk-dim);
+    color:var(--chalk);border-radius:10px;padding:12px 14px;font-size:16px;font-family:inherit;
+  }
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--crayon)}
+  .btn{
+    cursor:pointer;border:none;border-radius:12px;padding:13px 18px;font-size:16px;font-weight:800;
+    background:var(--crayon);color:#3a2410;letter-spacing:1px;
+    box-shadow:0 5px 0 #c9682f;transition:transform .05s, box-shadow .05s;
+  }
+  .btn:active{transform:translateY(4px);box-shadow:0 1px 0 #c9682f}
+  .btn.block{width:100%;margin-top:22px}
+  .btn.ghost{background:transparent;color:var(--chalk);border:2px solid var(--chalk-dim);box-shadow:none}
+  .btn.small{padding:8px 12px;font-size:13px}
+  .btn.yellow{background:var(--crayon-2);box-shadow:0 5px 0 #c9a227;color:#3a2f10}
+
+  /* ---- 遊戲區 ---- */
+  .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .pill{background:var(--board);border:2px solid var(--frame);border-radius:999px;
+    padding:7px 14px;font-weight:800;font-size:14px}
+  .pill .k{color:var(--chalk-dim);font-weight:600;margin-right:6px;font-size:12px}
+  .word-show{font-size:24px;font-weight:900;letter-spacing:8px;color:var(--crayon-2)}
+  .timer{color:var(--crayon)}
+  .timer.low{color:var(--pink);animation:blink .6s steps(2) infinite}
+  @keyframes blink{50%{opacity:.35}}
+
+  .game{display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start}
+  @media(max-width:820px){.game{grid-template-columns:1fr}}
+
+  .boardwrap{background:var(--frame);border-radius:16px;padding:10px;
+    box-shadow:inset 0 0 0 3px var(--frame-2), 0 10px 30px rgba(0,0,0,.4)}
+  canvas{display:block;width:100%;background:var(--board);border-radius:8px;touch-action:none;cursor:crosshair}
+  .tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .swatch{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.35);cursor:pointer}
+  .swatch.on{transform:scale(1.18);border-color:#fff;box-shadow:0 0 0 2px var(--crayon)}
+  .size{width:20px;height:20px;border-radius:50%;background:var(--chalk);cursor:pointer;opacity:.55}
+  .size.on{opacity:1;box-shadow:0 0 0 2px var(--crayon)}
+  .tools .gap{flex:1}
+
+  .side{display:flex;flex-direction:column;gap:12px}
+  .panel{background:var(--board);border:3px solid var(--frame);border-radius:14px;padding:12px}
+  .panel h3{margin:0 0 8px;font-size:13px;letter-spacing:2px;color:var(--chalk-dim)}
+  .players{display:flex;flex-direction:column;gap:6px}
+  .prow{display:flex;align-items:center;gap:8px;font-size:15px}
+  .prow .nm{flex:1;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .prow .sc{font-weight:900;color:var(--crayon-2)}
+  .prow.me .nm{color:var(--crayon)}
+  .badge{font-size:11px;padding:2px 6px;border-radius:6px;font-weight:800}
+  .badge.draw{background:var(--crayon);color:#3a2410}
+  .badge.ok{background:var(--good);color:#143}
+  .off{opacity:.4}
+
+  .chatbox{display:flex;flex-direction:column;height:300px}
+  .msgs{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:5px;padding-right:4px}
+  .msg{font-size:14px;line-height:1.4}
+  .msg .who{font-weight:800;margin-right:5px}
+  .msg.sys{color:var(--chalk-dim);font-style:italic;font-size:13px}
+  .msg.ok{color:var(--good);font-weight:800}
+  .msg.mine .who{color:var(--crayon)}
+  .chatin{display:flex;gap:6px;margin-top:8px}
+  .chatin input{margin:0}
+
+  /* ---- 選詞 / 結算 浮層 ---- */
+  .overlay{position:fixed;inset:0;background:rgba(8,16,14,.82);display:none;
+    align-items:center;justify-content:center;z-index:50;padding:20px}
+  .overlay.show{display:flex}
+  .modal{background:var(--board);border:8px solid var(--frame);border-radius:18px;
+    padding:26px;max-width:440px;width:100%;text-align:center}
+  .modal h2{margin:0 0 4px;font-size:20px}
+  .choices{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+  .reveal-word{font-size:30px;font-weight:900;color:var(--crayon-2);margin:10px 0 4px}
+  .hint{color:var(--chalk-dim);font-size:13px}
+  .toast{position:fixed;left:50%;top:18px;transform:translateX(-50%);
+    background:var(--crayon);color:#3a2410;font-weight:800;padding:10px 18px;border-radius:999px;
+    box-shadow:0 6px 16px rgba(0,0,0,.4);z-index:60;opacity:0;transition:opacity .25s, top .25s}
+  .toast.show{opacity:1;top:26px}
+  .row{display:flex;gap:8px}
+  .row > *{flex:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 入場 -->
+  <div id="gate" class="gate">
+    <div class="card">
+      <div class="logo">你畫我猜<small>D R A W &amp; G U E S S</small></div>
+      <div class="field">
+        <label>你的暱稱</label>
+        <input id="name" maxlength="16" placeholder="例如:畫畫鬼才阿明" />
+      </div>
+      <div class="field">
+        <label>房間代碼(跟朋友報同一組就會進同一房)</label>
+        <input id="room" maxlength="20" placeholder="例如:abc123" />
+      </div>
+      <button id="joinBtn" class="btn block">進房開畫 🖍️</button>
+      <p class="hint" style="margin-top:14px">繁體、簡體都能作答,系統會自動對答案。</p>
+    </div>
+  </div>
+
+  <!-- 遊戲 -->
+  <div id="app" style="display:none">
+    <div class="topbar">
+      <div class="pill"><span class="k">房</span><span id="roomTag">-</span></div>
+      <div class="pill"><span class="k">回合</span><span id="roundTag">-</span></div>
+      <div class="pill timer"><span class="k">時間</span><span id="timeTag">--</span>s</div>
+      <div class="pill word-show" id="wordTag" style="display:none"></div>
+      <div style="flex:1"></div>
+      <button id="inviteBtn" class="btn ghost small">邀請 🔗</button>
+      <button id="startBtn" class="btn yellow small" style="display:none">開始遊戲 ▶</button>
+    </div>
+
+    <div class="game">
+      <!-- 畫布 -->
+      <div>
+        <div class="boardwrap">
+          <canvas id="cv" width="760" height="500"></canvas>
+        </div>
+        <div class="tools" id="tools" style="display:none">
+          <span class="swatch on" data-c="#f4f1e8" style="background:#f4f1e8"></span>
+          <span class="swatch" data-c="#ff8a47" style="background:#ff8a47"></span>
+          <span class="swatch" data-c="#ffd166" style="background:#ffd166"></span>
+          <span class="swatch" data-c="#7ed957" style="background:#7ed957"></span>
+          <span class="swatch" data-c="#6ec6ff" style="background:#6ec6ff"></span>
+          <span class="swatch" data-c="#ff7b9c" style="background:#ff7b9c"></span>
+          <span style="width:8px"></span>
+          <span class="size" data-s="3" style="width:12px;height:12px"></span>
+          <span class="size on" data-s="6" style="width:18px;height:18px"></span>
+          <span class="size" data-s="14" style="width:26px;height:26px"></span>
+          <span class="gap"></span>
+          <button id="fillBtn" class="btn ghost small">填色</button>
+          <button id="undoBtn" class="btn ghost small">復原</button>
+          <button id="clearBtn" class="btn ghost small">清空</button>
+        </div>
+      </div>
+
+      <!-- 側欄 -->
+      <div class="side">
+        <div class="panel">
+          <h3>玩家 / 分數</h3>
+          <div id="players" class="players"></div>
+        </div>
+
+        <div class="panel" id="hostPanel" style="display:none">
+          <h3>房主設定</h3>
+          <div class="row">
+            <select id="diff">
+              <option>簡單</option><option selected>普通</option><option>困難</option>
+            </select>
+            <button id="addWordBtn" class="btn ghost small">＋自訂詞</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>聊天 / 搶答</h3>
+          <div class="chatbox">
+            <div id="msgs" class="msgs"></div>
+            <div class="chatin">
+              <input id="guess" maxlength="60" placeholder="打字搶答…" />
+              <button id="sendBtn" class="btn small">送</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 選詞浮層 -->
+<div id="chooseOverlay" class="overlay">
+  <div class="modal">
+    <h2>選一個詞來畫</h2>
+    <p class="hint">15 秒沒選就幫你選第一個 😏</p>
+    <div id="choices" class="choices"></div>
+  </div>
+</div>
+
+<!-- 自訂詞浮層 -->
+<div id="wordOverlay" class="overlay">
+  <div class="modal">
+    <h2>加入自訂詞</h2>
+    <p class="hint">一行一個,或用逗號分隔。例如:老闆、報表、咖啡</p>
+    <textarea id="customWords" rows="5" placeholder="社畜&#10;週報&#10;補班"></textarea>
+    <div class="row" style="margin-top:14px">
+      <button id="cwCancel" class="btn ghost">取消</button>
+      <button id="cwSave" class="btn">加進詞庫</button>
+    </div>
+  </div>
+</div>
+
+<!-- 結算浮層 -->
+<div id="revealOverlay" class="overlay">
+  <div class="modal">
+    <h2 id="revealTitle">時間到!</h2>
+    <div class="reveal-word" id="revealWord">＿＿</div>
+    <p class="hint">下一題馬上來…</p>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const socket = io();
+let me = { id:null, host:false };
+let amDrawer = false;
+let state = 'lobby';
+
+// ---- DOM ----
+const $ = (id)=>document.getElementById(id);
+const cv = $('cv'); const ctx = cv.getContext('2d');
+
+// ---- 入場 ----
+$('name').value = localStorage.getItem('dg_name')||'';
+$('room').value = (location.hash||'').replace('#','');
+$('joinBtn').onclick = ()=>{
+  const name=$('name').value.trim()||'無名氏';
+  const room=$('room').value.trim()||'lobby';
+  localStorage.setItem('dg_name',name);
+  location.hash=room;
+  socket.emit('join',{roomId:room,name});
+};
+$('room').addEventListener('keydown',e=>{if(e.key==='Enter')$('joinBtn').click()});
+$('name').addEventListener('keydown',e=>{if(e.key==='Enter')$('joinBtn').click()});
+
+socket.on('joined',({roomId,youId,hostId})=>{
+  me.id=youId; me.host=(hostId===youId);
+  $('gate').style.display='none'; $('app').style.display='block';
+  $('roomTag').textContent=roomId;
+  fitCanvas();
+});
+
+// ---- 房間狀態 ----
+socket.on('room',(r)=>{
+  state=r.state;
+  me.host=(r.hostId===me.id);
+  amDrawer=(r.drawerId===me.id);
+  $('roundTag').textContent = r.roundNo>0 ? ('#'+r.roundNo) : '等待中';
+  $('hostPanel').style.display = me.host?'block':'none';
+  $('startBtn').style.display = (me.host && (r.state==='lobby'||r.state==='reveal'))?'inline-block':'none';
+  $('diff').value = r.difficulty;
+  $('tools').style.display = (amDrawer && r.state==='drawing')?'flex':'none';
+
+  // 畫家看到詞,其他人看遮罩(roundStart 會給)
+  if(r.state!=='drawing'){ $('wordTag').style.display='none'; }
+
+  // 玩家列表
+  const box=$('players'); box.innerHTML='';
+  r.players.forEach(p=>{
+    const d=document.createElement('div');
+    d.className='prow'+(p.id===me.id?' me':'')+(p.connected?'':' off');
+    let badge='';
+    if(p.isDrawer) badge='<span class="badge draw">畫</span>';
+    else if(p.guessed) badge='<span class="badge ok">✓</span>';
+    d.innerHTML=`<span class="nm">${esc(p.name)}</span>${badge}<span class="sc">${p.score}</span>`;
+    box.appendChild(d);
+  });
+});
+
+$('inviteBtn').onclick=()=>{
+  const url=location.origin+location.pathname+'#'+($('roomTag').textContent||'');
+  const txt='來玩你畫我猜!房號:'+$('roomTag').textContent+'\n'+url;
+  if(navigator.share){ navigator.share({title:'你畫我猜',text:txt,url}).catch(()=>{}); }
+  else { navigator.clipboard.writeText(url).then(()=>toast('邀請連結已複製!')); }
+};
+$('startBtn').onclick=()=>socket.emit('start');
+$('diff').onchange=()=>socket.emit('setDifficulty',{difficulty:$('diff').value});
+
+// ---- 自訂詞 ----
+$('addWordBtn').onclick=()=>$('wordOverlay').classList.add('show');
+$('cwCancel').onclick=()=>$('wordOverlay').classList.remove('show');
+$('cwSave').onclick=()=>{
+  socket.emit('addWords',{words:$('customWords').value});
+  $('customWords').value=''; $('wordOverlay').classList.remove('show');
+};
+
+// ---- 選詞 ----
+socket.on('chooseWord',({choices})=>{
+  const box=$('choices'); box.innerHTML='';
+  choices.forEach(w=>{
+    const b=document.createElement('button');
+    b.className='btn block'; b.style.marginTop='0'; b.textContent=w;
+    b.onclick=()=>{socket.emit('chooseWord',{word:w});$('chooseOverlay').classList.remove('show')};
+    box.appendChild(b);
+  });
+  $('chooseOverlay').classList.add('show');
+});
+
+// ---- 回合開始 ----
+socket.on('yourWord',({word})=>{ // 只有畫家
+  $('wordTag').textContent=word; $('wordTag').style.display='block';
+});
+socket.on('roundStart',({masked,length,endsAt})=>{
+  $('chooseOverlay').classList.remove('show');
+  $('revealOverlay').classList.remove('show');
+  if(!amDrawer){ $('wordTag').textContent=`${masked}(${length}字)`; $('wordTag').style.display='block'; }
+  clearCanvas();
+});
+socket.on('tick',({left})=>{
+  $('timeTag').textContent=left;
+  $('timeTag').parentElement.classList.toggle('low',left<=10);
+});
+
+// ---- 結算 ----
+socket.on('roundEnd',({word,reason})=>{
+  $('revealTitle').textContent = reason==='allguessed'?'全員答對!🎉'
+    : reason==='drawer_left'?'畫家落跑 🏃' : '時間到!⏰';
+  $('revealWord').textContent=word;
+  $('revealOverlay').classList.add('show');
+  $('tools').style.display='none';
+});
+
+// ---- 聊天 / 搶答 ----
+function addMsg(html,cls=''){
+  const d=document.createElement('div'); d.className='msg '+cls; d.innerHTML=html;
+  $('msgs').appendChild(d); $('msgs').scrollTop=$('msgs').scrollHeight;
+}
+socket.on('system',({msg})=>addMsg(esc(msg),'sys'));
+socket.on('chat',({name,text,isDrawer})=>{
+  const mine = name===($('name').value.trim());
+  addMsg(`<span class="who">${esc(name)}${isDrawer?'(畫家)':''}:</span>${esc(text)}`, mine?'mine':'');
+});
+socket.on('correct',({name,gain})=>{
+  addMsg(`✅ <b>${esc(name)}</b> 答對了!+${gain}`,'ok');
+  toast(`${name} 答對 +${gain}`);
+});
+
+function send(){
+  const v=$('guess').value.trim(); if(!v)return;
+  socket.emit('guess',{text:v}); $('guess').value='';
+}
+$('sendBtn').onclick=send;
+$('guess').addEventListener('keydown',e=>{if(e.key==='Enter')send()});
+
+function toast(t){const el=$('toast');el.textContent=t;el.classList.add('show');
+  clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),1600);}
+
+// =================== 畫布 ===================
+let color='#f4f1e8', size=6, fillMode=false, drawing=false, last=null;
+
+function fitCanvas(){
+  const wrap=cv.parentElement;
+  const w=wrap.clientWidth-20;
+  const ratio=500/760;
+  cv.style.width=w+'px'; cv.style.height=(w*ratio)+'px';
+}
+window.addEventListener('resize',fitCanvas);
+
+function pos(e){
+  const r=cv.getBoundingClientRect();
+  const p=e.touches?e.touches[0]:e;
+  return { x:(p.clientX-r.left)/r.width*cv.width, y:(p.clientY-r.top)/r.height*cv.height };
+}
+function startDraw(e){
+  if(!amDrawer||state!=='drawing')return; e.preventDefault();
+  const p=pos(e);
+  if(fillMode){ doFill(p.x,p.y,color); return; }
+  drawing=true; last=p;
+  // 點一下也畫一個點
+  emitDraw({start:true,x:p.x,y:p.y,x2:p.x,y2:p.y,c:color,s:size});
+}
+function moveDraw(e){
+  if(!drawing||!amDrawer)return; e.preventDefault();
+  const p=pos(e);
+  emitDraw({x:last.x,y:last.y,x2:p.x,y2:p.y,c:color,s:size});
+  last=p;
+}
+function endDraw(){drawing=false;last=null;}
+
+function emitDraw(d){ drawSeg(d); socket.emit('draw',d); }
+function drawSeg(d){
+  if(d.start){ /* 起點 */ }
+  ctx.strokeStyle=d.c; ctx.lineWidth=d.s; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath(); ctx.moveTo(d.x,d.y); ctx.lineTo(d.x2,d.y2); ctx.stroke();
+}
+
+cv.addEventListener('mousedown',startDraw);
+cv.addEventListener('mousemove',moveDraw);
+window.addEventListener('mouseup',endDraw);
+cv.addEventListener('touchstart',startDraw,{passive:false});
+cv.addEventListener('touchmove',moveDraw,{passive:false});
+cv.addEventListener('touchend',endDraw);
+
+// 收到別人(畫家)的畫
+socket.on('draw',drawSeg);
+socket.on('clearCanvas',clearCanvasLocal);
+socket.on('canvasHistory',(strokes)=>{ clearCanvasLocal(); strokes.forEach(drawSeg); });
+
+function clearCanvasLocal(){ ctx.clearRect(0,0,cv.width,cv.height); }
+function clearCanvas(){ clearCanvasLocal(); }
+
+// 工具列
+document.querySelectorAll('.swatch').forEach(s=>s.onclick=()=>{
+  document.querySelectorAll('.swatch').forEach(x=>x.classList.remove('on'));
+  s.classList.add('on'); color=s.dataset.c; fillMode=false; $('fillBtn').classList.remove('on');
+});
+document.querySelectorAll('.size').forEach(s=>s.onclick=()=>{
+  document.querySelectorAll('.size').forEach(x=>x.classList.remove('on'));
+  s.classList.add('on'); size=+s.dataset.s;
+});
+$('fillBtn').onclick=()=>{ fillMode=!fillMode; $('fillBtn').classList.toggle('on'); };
+$('clearBtn').onclick=()=>{ if(amDrawer){clearCanvasLocal();socket.emit('clearCanvas');} };
+$('undoBtn').onclick=()=>{ if(amDrawer)socket.emit('undo'); };
+
+// 油漆桶填色 (flood fill)
+function doFill(sx,sy,hex){
+  sx=Math.floor(sx); sy=Math.floor(sy);
+  const img=ctx.getImageData(0,0,cv.width,cv.height);
+  const data=img.data, W=cv.width, H=cv.height;
+  const idx=(x,y)=>(y*W+x)*4;
+  const target=[...data.slice(idx(sx,sy),idx(sx,sy)+4)];
+  const fc=hexToRgba(hex);
+  if(same(target,fc,0))return;
+  const stack=[[sx,sy]];
+  const match=(x,y)=>{const i=idx(x,y);return same([data[i],data[i+1],data[i+2],data[i+3]],target,40);};
+  while(stack.length){
+    const [x,y]=stack.pop();
+    if(x<0||y<0||x>=W||y>=H||!match(x,y))continue;
+    const i=idx(x,y); data[i]=fc[0];data[i+1]=fc[1];data[i+2]=fc[2];data[i+3]=255;
+    stack.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
+  }
+  ctx.putImageData(img,0,0);
+  // 同步整張畫布給其他人 (用一筆特殊事件: 直接重送整張較重,這裡用大量點不切實際,改傳填色指令)
+  socket.emit('draw',{fill:true,x:sx,y:sy,c:hex});
+}
+// 收到填色指令時重放
+const _drawSeg = drawSeg;
+socket.off && socket.off('draw');
+socket.on('draw',(d)=>{ if(d.fill){ doFillRemote(d.x,d.y,d.c); } else { _drawSeg(d); } });
+function doFillRemote(x,y,hex){ // 在接收端執行相同 flood fill
+  const img=ctx.getImageData(0,0,cv.width,cv.height);
+  const data=img.data,W=cv.width,H=cv.height;
+  const idx=(a,b)=>(b*W+a)*4;
+  const target=[...data.slice(idx(x,y),idx(x,y)+4)];
+  const fc=hexToRgba(hex); if(same(target,fc,0))return;
+  const st=[[x,y]];
+  const match=(a,b)=>{const i=idx(a,b);return same([data[i],data[i+1],data[i+2],data[i+3]],target,40);};
+  while(st.length){const [a,b]=st.pop();
+    if(a<0||b<0||a>=W||b>=H||!match(a,b))continue;
+    const i=idx(a,b);data[i]=fc[0];data[i+1]=fc[1];data[i+2]=fc[2];data[i+3]=255;
+    st.push([a+1,b],[a-1,b],[a,b+1],[a,b-1]);}
+  ctx.putImageData(img,0,0);
+}
+
+function hexToRgba(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16),255];}
+function same(a,b,tol){return Math.abs(a[0]-b[0])<=tol&&Math.abs(a[1]-b[1])<=tol&&Math.abs(a[2]-b[2])<=tol&&Math.abs(a[3]-b[3])<=tol;}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+</script>
+</body>
+</html>
