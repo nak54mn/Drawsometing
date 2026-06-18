@@ -67,7 +67,34 @@
   @keyframes blink{50%{opacity:.35}}
 
   .game{display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start}
-  @media(max-width:820px){.game{grid-template-columns:1fr}}
+  @media(max-width:820px){
+    .game{grid-template-columns:1fr;gap:8px}
+    .wrap{padding:8px}
+    /* 上方資訊縮小、只留必要 */
+    .topbar{gap:6px;margin-bottom:6px}
+    .pill{padding:4px 9px;font-size:12px}
+    .pill .k{font-size:10px;margin-right:3px}
+    .word-show{font-size:18px;letter-spacing:4px}
+    /* 畫布縮一點,留空間給下面;用寬度上限維持比例,觸控才不會偏 */
+    .boardwrap{padding:6px;max-width:58vh;margin:0 auto;width:100%}
+    .tools{gap:6px;margin-top:6px}
+    /* 玩家列表改成橫向一條,不佔高 */
+    #playersPanel .players{flex-direction:row;overflow-x:auto;gap:10px;padding-bottom:2px}
+    #playersPanel .prow{flex:0 0 auto;background:rgba(0,0,0,.18);border-radius:999px;
+      padding:4px 10px;gap:5px}
+    #playersPanel .prow .nm{max-width:80px}
+    #playersPanel h3{display:none}
+    .panel{padding:8px}
+    /* 聊天區拉高,搶答框置底固定 */
+    .chatbox{height:auto}
+    .chatbox .msgs{height:26vh}
+    .chatin{position:sticky;bottom:0;background:var(--board);padding-top:6px}
+    /* 順序:玩家細條 -> 聊天搶答 -> 房主設定 */
+    .side{gap:8px}
+    #playersPanel{order:1}
+    #hostPanel{order:3}
+    .side .panel:last-child{order:2}
+  }
 
   .boardwrap{background:var(--frame);border-radius:16px;padding:10px;
     box-shadow:inset 0 0 0 3px var(--frame-2), 0 10px 30px rgba(0,0,0,.4)}
@@ -178,7 +205,7 @@
 
       <!-- 側欄 -->
       <div class="side">
-        <div class="panel">
+        <div class="panel" id="playersPanel">
           <h3>玩家 / 分數</h3>
           <div id="players" class="players"></div>
         </div>
@@ -212,21 +239,23 @@
 <div id="chooseOverlay" class="overlay">
   <div class="modal">
     <h2>選一個詞來畫</h2>
-    <p class="hint">15 秒沒選就幫你選第一個 😏</p>
+    <p class="hint">不喜歡這幾個?可以換一批。15 秒沒選自動選第一個 😏</p>
     <div id="choices" class="choices"></div>
+    <button id="rerollBtn" class="btn ghost block" style="margin-top:12px">🎲 換一批詞</button>
   </div>
 </div>
 
 <!-- 自訂詞浮層 -->
 <div id="wordOverlay" class="overlay">
   <div class="modal">
-    <h2>加入自訂詞</h2>
+    <h2>詞庫管理</h2>
     <p class="hint">一行一個,或用逗號分隔。例如:老闆、報表、咖啡</p>
     <textarea id="customWords" rows="5" placeholder="社畜&#10;週報&#10;補班"></textarea>
     <div class="row" style="margin-top:14px">
       <button id="cwCancel" class="btn ghost">取消</button>
       <button id="cwSave" class="btn">加進詞庫</button>
     </div>
+    <button id="exportBtn" class="btn ghost block" style="margin-top:10px">⬇️ 匯出目前詞庫(JSON)</button>
   </div>
 </div>
 
@@ -314,8 +343,13 @@ $('cwSave').onclick=()=>{
   socket.emit('addWords',{words:$('customWords').value});
   $('customWords').value=''; $('wordOverlay').classList.remove('show');
 };
+$('exportBtn').onclick=()=>{
+  const room=$('roomTag').textContent||'default';
+  window.open('/words/'+encodeURIComponent(room),'_blank');
+};
 
 // ---- 選詞 ----
+$('rerollBtn').onclick=()=>socket.emit('rerollWords');
 socket.on('chooseWord',({choices})=>{
   const box=$('choices'); box.innerHTML='';
   choices.forEach(w=>{
@@ -408,7 +442,13 @@ function moveDraw(e){
 }
 function endDraw(){drawing=false;last=null;}
 
-function emitDraw(d){ drawSeg(d); socket.emit('draw',d); }
+// 本機立刻畫(零延遲視覺),送網路的部分批次打包,每 ~40ms 送一次,大幅降低封包量
+let drawBuffer=[];
+function emitDraw(d){ drawSeg(d); drawBuffer.push(d); }
+setInterval(()=>{
+  if(drawBuffer.length){ socket.emit('drawBatch',drawBuffer); drawBuffer=[]; }
+},40);
+
 function drawSeg(d){
   if(d.start){ /* 起點 */ }
   ctx.strokeStyle=d.c; ctx.lineWidth=d.s; ctx.lineCap='round'; ctx.lineJoin='round';
@@ -422,8 +462,7 @@ cv.addEventListener('touchstart',startDraw,{passive:false});
 cv.addEventListener('touchmove',moveDraw,{passive:false});
 cv.addEventListener('touchend',endDraw);
 
-// 收到別人(畫家)的畫
-socket.on('draw',drawSeg);
+// 收到別人(畫家)的畫:draw=單筆(填色用), drawBatch=批次線條
 socket.on('clearCanvas',clearCanvasLocal);
 socket.on('canvasHistory',(strokes)=>{ clearCanvasLocal(); strokes.forEach(drawSeg); });
 
@@ -464,10 +503,9 @@ function doFill(sx,sy,hex){
   // 同步整張畫布給其他人 (用一筆特殊事件: 直接重送整張較重,這裡用大量點不切實際,改傳填色指令)
   socket.emit('draw',{fill:true,x:sx,y:sy,c:hex});
 }
-// 收到填色指令時重放
-const _drawSeg = drawSeg;
-socket.off && socket.off('draw');
-socket.on('draw',(d)=>{ if(d.fill){ doFillRemote(d.x,d.y,d.c); } else { _drawSeg(d); } });
+// 統一接收:單筆事件(填色) + 批次線條
+socket.on('draw',(d)=>{ if(d && d.fill){ doFillRemote(d.x,d.y,d.c); } else if(d){ drawSeg(d); } });
+socket.on('drawBatch',(arr)=>{ if(Array.isArray(arr)) arr.forEach(drawSeg); });
 function doFillRemote(x,y,hex){ // 在接收端執行相同 flood fill
   const img=ctx.getImageData(0,0,cv.width,cv.height);
   const data=img.data,W=cv.width,H=cv.height;
