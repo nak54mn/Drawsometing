@@ -85,15 +85,18 @@
     #playersPanel .prow .nm{max-width:80px}
     #playersPanel h3{display:none}
     .panel{padding:8px}
-    /* 聊天區拉高,搶答框置底固定 */
+    /* 聊天區拉高 */
     .chatbox{height:auto}
-    .chatbox .msgs{height:26vh}
-    .chatin{position:sticky;bottom:0;background:var(--board);padding-top:6px}
-    /* 順序:玩家細條 -> 聊天搶答 -> 房主設定 */
-    .side{gap:8px}
-    #playersPanel{order:1}
+    .chatbox .msgs{flex:none;height:18vh;max-height:18vh}
+    .chatin{background:var(--board);padding-top:6px}
+    /* 手機版:整個聊天區移到畫布上方 */
+    .game{display:flex;flex-direction:column}
+    .side{gap:8px;order:1}            /* 側欄排畫布前面 */
+    .boardcol{order:2}               /* 畫布排側欄後面 */
+    /* 側欄內部順序:聊天搶答 -> 玩家細條 -> 房主設定 */
+    .side .panel:last-child{order:1} /* 聊天面板 */
+    #playersPanel{order:2}
     #hostPanel{order:3}
-    .side .panel:last-child{order:2}
   }
 
   .boardwrap{background:var(--frame);border-radius:16px;padding:10px;
@@ -181,7 +184,7 @@
 
     <div class="game">
       <!-- 畫布 -->
-      <div>
+      <div class="boardcol">
         <div class="boardwrap">
           <canvas id="cv" width="760" height="500"></canvas>
         </div>
@@ -214,10 +217,11 @@
           <h3>房主設定</h3>
           <div class="row">
             <select id="diff">
-              <option>簡單</option><option selected>普通</option><option>困難</option>
+              <option>簡單</option><option selected>普通</option><option>困難</option><option value="混合">混合(全部)</option>
             </select>
             <button id="addWordBtn" class="btn ghost small">＋自訂詞</button>
           </div>
+          <p class="hint" style="margin:8px 0 0;font-size:11px">難度可隨時切換,下一局生效。混合=三難度全混</p>
         </div>
 
         <div class="panel">
@@ -306,6 +310,11 @@ socket.on('room',(r)=>{
   state=r.state;
   me.host=(r.hostId===me.id);
   amDrawer=(r.drawerId===me.id);
+  // 進入選題或作畫階段就關掉結算浮層,讓所有人(尤其非畫家)能正常用聊天
+  if(r.state==='choosing'||r.state==='drawing'){
+    $('revealOverlay').classList.remove('show');
+    clearInterval(window._revealCd);
+  }
   $('roundTag').textContent = r.roundNo>0 ? ('#'+r.roundNo) : '等待中';
   $('hostPanel').style.display = me.host?'block':'none';
   $('startBtn').style.display = (me.host && (r.state==='lobby'||r.state==='reveal'))?'inline-block':'none';
@@ -419,11 +428,25 @@ socket.on('correct',({name,gain})=>{
 });
 
 function send(){
-  const v=$('guess').value.trim(); if(!v)return;
-  socket.emit('guess',{text:v}); $('guess').value='';
+  const inp=$('guess');
+  const v=inp.value.trim();
+  if(!v){ inp.value=''; return; }
+  socket.emit('guess',{text:v});
+  inp.value='';            // 清空
+  inp.focus();             // 保持游標在輸入框,方便連續打
 }
 $('sendBtn').onclick=send;
-$('guess').addEventListener('keydown',e=>{if(e.key==='Enter')send()});
+// 追蹤中文輸入法選字狀態,選字中按 Enter 不送出(那是在確認選字)
+let composing=false;
+$('guess').addEventListener('compositionstart',()=>composing=true);
+$('guess').addEventListener('compositionend',()=>composing=false);
+$('guess').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){
+    e.preventDefault();      // 阻止換行/重複觸發
+    if(composing) return;    // 還在選字,不送
+    send();
+  }
+});
 
 function toast(t){const el=$('toast');el.textContent=t;el.classList.add('show');
   clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),1600);}
