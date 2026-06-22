@@ -219,8 +219,14 @@ function broadcast(room) {
 }
 
 function wordPool(room) {
-  const base = DEFAULT_WORDS[room.difficulty] || [];
-  return [...base, ...room.customWords];
+  let base;
+  if (room.difficulty === '混合') {
+    base = [...DEFAULT_WORDS['簡單'], ...DEFAULT_WORDS['普通'], ...DEFAULT_WORDS['困難']];
+  } else {
+    base = DEFAULT_WORDS[room.difficulty] || [];
+  }
+  // 合併自訂詞並去重(混合模式跨難度可能有重複)
+  return [...new Set([...base, ...room.customWords])];
 }
 
 function pickWords(room, n = 4) {
@@ -406,7 +412,8 @@ io.on('connection', (socket) => {
   socket.on('setDifficulty', ({ difficulty }) => {
     const room = joinedRoom;
     if (!room || room.hostId !== socket.id) return;
-    if (DEFAULT_WORDS[difficulty]) { room.difficulty = difficulty; broadcast(room); }
+    const allowed = ['簡單', '普通', '困難', '混合'];
+    if (allowed.includes(difficulty)) { room.difficulty = difficulty; broadcast(room); }
   });
 
   socket.on('addWords', ({ words }) => {
