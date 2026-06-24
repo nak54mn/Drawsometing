@@ -368,6 +368,13 @@ function makeRoom(roomId) {
 }
 
 function publicRoom(room) {
+  const list = room.order
+    .map((id) => room.players[id])
+    .filter(Boolean)
+    .map((p) => ({ id: p.id, name: p.name, score: p.score, connected: p.connected,
+      isDrawer: p.id === room.drawerId, guessed: !!room.guessedThisRound[p.id] }));
+  // 在線的排前面,斷線的排後面(各自維持原本加入順序)
+  list.sort((a, b) => (a.connected === b.connected) ? 0 : (a.connected ? -1 : 1));
   return {
     id: room.id,
     state: room.state,
@@ -377,11 +384,7 @@ function publicRoom(room) {
     roundNo: room.roundNo,
     hostId: room.hostId,
     customWordsCount: room.customWords.length,
-    players: room.order
-      .map((id) => room.players[id])
-      .filter(Boolean)
-      .map((p) => ({ id: p.id, name: p.name, score: p.score, connected: p.connected,
-        isDrawer: p.id === room.drawerId, guessed: !!room.guessedThisRound[p.id] })),
+    players: list,
   };
 }
 
